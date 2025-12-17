@@ -51,8 +51,8 @@ class Constraint:
 
     @property
     def key(self) -> str:
-        """Unique identifier for comparison."""
-        return f"{self.constraint_schema}.{self.constraint_name}"
+        """Unique identifier for comparison (schema.table.constraint)."""
+        return f"{self.table_schema}.{self.table_name}.{self.constraint_name}"
 
     def __str__(self) -> str:
         return f"Constraint({self.key})"
@@ -63,16 +63,24 @@ class Constraint:
 # and produces unstable output across DDL rewrites and Postgres versions.
 QUERY = """
 SELECT
-    tc.constraint_schema,
-    tc.constraint_name,
-    tc.table_schema,
-    tc.table_name,
-    tc.constraint_type,
-    pg_get_constraintdef(c.oid) AS constraint_definition
+  tc.constraint_schema,
+  tc.constraint_name,
+  tc.table_schema,
+  tc.table_name,
+  tc.constraint_type,
+  pg_get_constraintdef(c.oid) AS constraint_definition
 FROM information_schema.table_constraints tc
+JOIN pg_namespace tn
+  ON tn.nspname = tc.table_schema
+JOIN pg_class t
+  ON t.relnamespace = tn.oid
+ AND t.relname = tc.table_name
+LEFT JOIN pg_namespace cn
+  ON cn.nspname = tc.constraint_schema
 LEFT JOIN pg_constraint c
-    ON c.conname = tc.constraint_name
-    AND c.connamespace = (SELECT oid FROM pg_namespace WHERE nspname = tc.constraint_schema)
+  ON c.connamespace = cn.oid
+ AND c.conname = tc.constraint_name
+ AND c.conrelid = t.oid
 WHERE tc.constraint_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
   AND tc.constraint_schema NOT LIKE 'pg_temp_%'
 ORDER BY tc.constraint_schema, tc.table_name, tc.constraint_name

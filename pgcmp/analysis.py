@@ -296,8 +296,8 @@ class ConstraintAnalysis(AnalysisRow):
 
     @property
     def full_name(self) -> str:
-        """Return schema.constraint format."""
-        return f"{self.schema_name}.{self.name}"
+        """Return schema.table.constraint format."""
+        return f"{self.schema_name}.{self.table_name}.{self.name}"
 
     def get_modifications(self) -> list[str]:
         """Get list of modification descriptions.
@@ -953,7 +953,7 @@ def _analyze_constraints_for_table(
 
     return [
         ConstraintAnalysis(
-            name=key.split(".", 1)[1] if "." in key else key,
+            name=key.split(".")[-1],  # key is schema.table.constraint
             schema_name=schema_name,
             table_name=table_name,
             in_left=key in left_constraints,
