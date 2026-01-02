@@ -64,3 +64,27 @@ def fetch_tables(conn: psycopg.Connection) -> dict[str, Table]:
         )
         tables[table.key] = table
     return tables
+
+
+def fetch_row_counts(conn: psycopg.Connection) -> dict[str, int]:
+    """Fetch row counts for all tables by querying information_schema.
+
+    Returns:
+        A dictionary mapping table keys (schema.table_name) to row counts.
+    """
+    row_counts = {}
+    with conn.cursor() as cur:
+        cur.execute(QUERY)
+        table_rows = cur.fetchall()
+
+    for row in table_rows:
+        table_schema = row[0]
+        table_name = row[1]
+        key = f"{table_schema}.{table_name}"
+
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT COUNT(*) FROM "{table_schema}"."{table_name}"')
+            count_row = cur.fetchone()
+            row_counts[key] = count_row[0] if count_row else 0
+
+    return row_counts

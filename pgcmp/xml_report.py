@@ -6,11 +6,17 @@ from xml.dom import minidom
 from .analysis import AnalysisResult
 
 
-def generate_xml_report(result: AnalysisResult) -> str:
+def generate_xml_report(
+    result: AnalysisResult,
+    row_counts_before: dict[str, int] | None = None,
+    row_counts_after: dict[str, int] | None = None,
+) -> str:
     """Generate an XML report from analysis results.
 
     Args:
         result: The AnalysisResult containing comparison data.
+        row_counts_before: Optional dict of table row counts before SQL was applied.
+        row_counts_after: Optional dict of table row counts after SQL was applied.
 
     Returns:
         Pretty-printed XML string.
@@ -138,6 +144,44 @@ def generate_xml_report(result: AnalysisResult) -> str:
                 SubElement(func_elem, "action").text = func.action_description
                 if func.is_modified:
                     SubElement(func_elem, "detail").text = func.modification_detail
+
+    # Add row_counts section if before/after data is provided
+    if row_counts_before is not None and row_counts_after is not None:
+        row_counts_elem = SubElement(root, "row_counts")
+        all_tables = sorted(
+            set(row_counts_before.keys()) | set(row_counts_after.keys())
+        )
+        for table_key in all_tables:
+            in_before = table_key in row_counts_before
+            in_after = table_key in row_counts_after
+            before_count = row_counts_before.get(table_key, 0)
+            after_count = row_counts_after.get(table_key, 0)
+
+            # Determine action based on presence in before/after
+            if in_before and in_after:
+                # Table exists in both - show change if any
+                if before_count != after_count:
+                    row_count_elem = SubElement(row_counts_elem, "row_count")
+                    SubElement(row_count_elem, "name").text = table_key
+                    SubElement(row_count_elem, "action").text = "modified"
+                    SubElement(row_count_elem, "before_count").text = str(before_count)
+                    SubElement(row_count_elem, "after_count").text = str(after_count)
+                    diff = after_count - before_count
+                    SubElement(row_count_elem, "change").text = (
+                        f"+{diff}" if diff > 0 else str(diff)
+                    )
+            elif in_before and not in_after:
+                # Table was removed - show rows that were removed
+                row_count_elem = SubElement(row_counts_elem, "row_count")
+                SubElement(row_count_elem, "name").text = table_key
+                SubElement(row_count_elem, "action").text = "removed"
+                SubElement(row_count_elem, "rows_removed").text = str(before_count)
+            else:
+                # Table was added - show rows that were added
+                row_count_elem = SubElement(row_counts_elem, "row_count")
+                SubElement(row_count_elem, "name").text = table_key
+                SubElement(row_count_elem, "action").text = "added"
+                SubElement(row_count_elem, "rows_added").text = str(after_count)
 
     # Add difference count
     SubElement(root, "number_of_differences").text = str(result.count_differences())

@@ -169,80 +169,78 @@ def print_comparison_table(result: AnalysisResult) -> None:
     console.print(table)
 
 
-def print_row_counts(
-    left_db: "Database", right_db: "Database", xml_output: bool
-) -> int:
-    """Print row count comparison for tables in both databases."""
-    from xml.etree.ElementTree import Element, SubElement, tostring
-    from xml.dom import minidom
+def print_row_counts(db: "Database") -> int:
+    """Print row count comparison table for tables before/after SQL was applied.
 
-    # Find tables that exist in both databases
-    common_tables = sorted(set(left_db.tables.keys()) & set(right_db.tables.keys()))
+    Compares row counts captured before applying SQL to row counts after.
+    Returns the number of tables with different row counts.
+    """
+    before_counts = db.row_counts_before_sql
+    # Get after counts from the tables dict
+    after_counts = {key: tbl.row_count or 0 for key, tbl in db.tables.items()}
+
+    # Get all table keys (union of before and after)
+    all_tables = sorted(set(before_counts.keys()) | set(after_counts.keys()))
 
     differences = 0
 
-    if xml_output:
-        root = Element("row_count_comparison")
+    table = Table(
+        title="Row Count Comparison (Before/After SQL)",
+        show_header=True,
+        header_style="bold",
+        show_lines=True,
+    )
+    table.add_column("Table", style="white", no_wrap=True)
+    table.add_column("Before", justify="right", no_wrap=True)
+    table.add_column("After", justify="right", no_wrap=True)
+    table.add_column("Change", justify="right", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
 
-        # Add connection info
-        connections = SubElement(root, "connections")
-        left_conn = SubElement(connections, "left")
-        left_conn.text = left_db.connection_string
-        right_conn = SubElement(connections, "right")
-        right_conn.text = right_db.connection_string
+    for table_key in all_tables:
+        in_before = table_key in before_counts
+        in_after = table_key in after_counts
+        before_count = before_counts.get(table_key, 0)
+        after_count = after_counts.get(table_key, 0)
 
-        tables_elem = SubElement(root, "tables")
-        for table_key in common_tables:
-            left_table = left_db.tables[table_key]
-            right_table = right_db.tables[table_key]
-            left_count = left_table.row_count or 0
-            right_count = right_table.row_count or 0
-            differs = left_count != right_count
-            if differs:
+        if in_before and in_after:
+            # Table exists in both - show both counts and change
+            if before_count != after_count:
                 differences += 1
-
-            table_elem = SubElement(tables_elem, "table")
-            SubElement(table_elem, "name").text = table_key
-            SubElement(table_elem, "left_count").text = str(left_count)
-            SubElement(table_elem, "right_count").text = str(right_count)
-            SubElement(table_elem, "differs").text = str(differs).lower()
-
-        SubElement(root, "number_of_differences").text = str(differences)
-
-        rough_string = tostring(root, encoding="unicode")
-        reparsed = minidom.parseString(rough_string)
-        print(reparsed.toprettyxml(indent="  "))
-    else:
-        table = Table(
-            title="Row Count Comparison",
-            show_header=True,
-            header_style="bold",
-            show_lines=True,
-        )
-        table.add_column("Table", style="white", no_wrap=True)
-        table.add_column("Left", justify="right", no_wrap=True)
-        table.add_column("Right", justify="right", no_wrap=True)
-        table.add_column("Status", no_wrap=True)
-
-        for table_key in common_tables:
-            left_table = left_db.tables[table_key]
-            right_table = right_db.tables[table_key]
-            left_count = left_table.row_count or 0
-            right_count = right_table.row_count or 0
-            differs = left_count != right_count
-            if differs:
-                differences += 1
-                status = "[cyan]differs[/cyan]"
+                diff = after_count - before_count
+                change = f"+{diff}" if diff > 0 else str(diff)
+                status = "[cyan]modified[/cyan]"
             else:
+                change = ""
                 status = "[green]match[/green]"
+            table.add_row(
+                table_key, str(before_count), str(after_count), change, status
+            )
+        elif in_before and not in_after:
+            # Table was removed - show rows that were removed
+            differences += 1
+            table.add_row(
+                table_key,
+                str(before_count),
+                "-",
+                f"-{before_count}",
+                "[red]removed[/red]",
+            )
+        else:
+            # Table was added - show rows that were added
+            differences += 1
+            table.add_row(
+                table_key,
+                "-",
+                str(after_count),
+                f"+{after_count}",
+                "[yellow]added[/yellow]",
+            )
 
-            table.add_row(table_key, str(left_count), str(right_count), status)
+    console.print()
+    console.print(table)
+    console.print(f"\n[bold]Tables with different row counts: {differences}[/bold]")
 
-        console.print()
-        console.print(table)
-        console.print(f"\n[bold]Tables with different row counts: {differences}[/bold]")
-
-    return 0 if differences == 0 else 2
+    return differences
 
 
 def _format_schema_action(schema: SchemaAnalysis) -> str:
@@ -365,12 +363,6 @@ Examples:
         help="SQL file to apply to old database in a transaction before comparing (rolled back after)",
     )
     parser.add_argument(
-        "--row-counts",
-        action="store_true",
-        default=False,
-        help="Only compare row counts (skip schema comparison)",
-    )
-    parser.add_argument(
         "--xml",
         action="store_true",
         default=False,
@@ -399,11 +391,6 @@ def main() -> int:
         console.print(f"[red]Error connecting to right database: {e}[/red]")
         return 1
 
-    # Handle --row-counts mode separately
-    if args.row_counts:
-        console.print("[bold]Comparing row counts...[/bold]")
-        return print_row_counts(left_db, right_db, args.xml)
-
     # Step 2 & 3: Analyze databases (schemas, then tables for matching schemas)
     console.print("[bold]Analyzing differences...[/bold]")
     result = analyze_databases(left_db, right_db)
@@ -412,17 +399,32 @@ def main() -> int:
     if result.version_warning:
         console.print(f"[yellow]{result.version_warning}[/yellow]")
 
+    # Prepare row count data if SQL was applied
+    row_counts_before = None
+    row_counts_after = None
+    row_count_differences = 0
+    if apply_sql:
+        row_counts_before = right_db.row_counts_before_sql
+        row_counts_after = {key: tbl.row_count or 0 for key, tbl in right_db.tables.items()}
+
     # Step 4: Display results in requested format
     console.print()
     if args.xml:
         # XML output - print directly without rich formatting
-        xml_output = generate_xml_report(result)
+        xml_output = generate_xml_report(result, row_counts_before, row_counts_after)
         print(xml_output)
     else:
         # Table output using rich
         print_comparison_table(result)
 
-    return 0 if not result.has_differences() else 2
+        # Show row count comparison table if SQL was applied
+        if apply_sql:
+            console.print()
+            console.print("[bold]Comparing row counts (before/after SQL)...[/bold]")
+            row_count_differences = print_row_counts(right_db)
+
+    has_differences = result.has_differences() or row_count_differences > 0
+    return 0 if not has_differences else 2
 
 
 if __name__ == "__main__":

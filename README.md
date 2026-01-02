@@ -27,8 +27,8 @@ uv run python main.py "postgresql://user:pass@host1:5432/db1" "postgresql://user
 # Output as XML
 uv run python main.py --xml "postgres://localhost/db1" "postgres://localhost/db2"
 
-# Compare row counts only
-uv run python main.py --row-counts "postgres://localhost/db1" "postgres://localhost/db2"
+# Apply SQL file and compare (row counts are compared before/after SQL is applied)
+uv run python main.py --apply-sql-file migration.sql "postgres://localhost/db1" "postgres://localhost/db2"
 ```
 
 ### Options
@@ -36,7 +36,7 @@ uv run python main.py --row-counts "postgres://localhost/db1" "postgres://localh
 | Option | Description |
 |--------|-------------|
 | `--xml` | Output results in XML format |
-| `--row-counts` | Compare row counts instead of schema |
+| `--apply-sql-file` | SQL file to apply to old database in a transaction before comparing (rolled back after). Row counts are compared before and after the SQL is applied. |
 
 ## What It Compares
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import psycopg
 
 from .schemas import Schema, fetch_schemas
-from .tables import Table, fetch_tables
+from .tables import Table, fetch_tables, fetch_row_counts
 from .columns import Column, fetch_columns
 from .indexes import Index, fetch_indexes
 from .constraints import Constraint, fetch_constraints
@@ -48,6 +48,8 @@ class Database:
     functions: dict[str, Function] = field(default_factory=dict)
     materialized_views: dict[str, MaterializedView] = field(default_factory=dict)
     sequences: dict[str, Sequence] = field(default_factory=dict)
+    # Row counts before SQL was applied (only populated when apply_sql is used)
+    row_counts_before_sql: dict[str, int] = field(default_factory=dict)
 
     @property
     def major_version(self) -> str:
@@ -77,11 +79,15 @@ class Database:
             apply_sql: Optional SQL to execute before fetching schema info.
                        The SQL is executed in a transaction that is rolled back
                        after fetching, so changes are not persisted.
+                       When apply_sql is provided, row counts are captured both
+                       before and after applying the SQL for comparison.
         """
         with psycopg.connect(self.connection_string, autocommit=True) as conn:
             try:
                 with conn.transaction():
                     if apply_sql:
+                        # Capture row counts BEFORE applying SQL
+                        self.row_counts_before_sql = fetch_row_counts(conn)
                         with conn.cursor() as cur:
                             cur.execute(apply_sql)  # type: ignore[arg-type]
 
