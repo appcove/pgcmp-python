@@ -55,26 +55,51 @@ class Database:
         return _extract_major_version(self.postgres_version)
 
     @classmethod
-    def from_connection_string(cls, connection_string: str) -> "Database":
-        """Create a Database snapshot by connecting and fetching all objects."""
+    def from_connection_string(
+        cls, connection_string: str, apply_sql: str | None = None
+    ) -> "Database":
+        """Create a Database snapshot by connecting and fetching all objects.
+
+        Args:
+            connection_string: PostgreSQL connection string.
+            apply_sql: Optional SQL to execute before fetching schema info.
+                       The SQL is executed in a transaction that is rolled back
+                       after fetching, so changes are not persisted.
+        """
         db = cls(connection_string=connection_string)
-        db.fetch_all()
+        db.fetch_all(apply_sql=apply_sql)
         return db
 
-    def fetch_all(self) -> None:
-        """Fetch all schema objects from the database."""
-        with psycopg.connect(self.connection_string) as conn:
-            self.postgres_version = _fetch_postgres_version(conn)
-            self.schemas = fetch_schemas(conn)
-            self.tables = fetch_tables(conn)
-            self.columns = fetch_columns(conn)
-            self.indexes = fetch_indexes(conn)
-            self.constraints = fetch_constraints(conn)
-            self.views = fetch_views(conn)
-            self.triggers = fetch_triggers(conn)
-            self.functions = fetch_functions(conn)
-            self.materialized_views = fetch_materialized_views(conn)
-            self.sequences = fetch_sequences(conn)
+    def fetch_all(self, apply_sql: str | None = None) -> None:
+        """Fetch all schema objects from the database.
+
+        Args:
+            apply_sql: Optional SQL to execute before fetching schema info.
+                       The SQL is executed in a transaction that is rolled back
+                       after fetching, so changes are not persisted.
+        """
+        with psycopg.connect(self.connection_string, autocommit=True) as conn:
+            try:
+                with conn.transaction():
+                    if apply_sql:
+                        with conn.cursor() as cur:
+                            cur.execute(apply_sql)  # type: ignore[arg-type]
+
+                    self.postgres_version = _fetch_postgres_version(conn)
+                    self.schemas = fetch_schemas(conn)
+                    self.tables = fetch_tables(conn)
+                    self.columns = fetch_columns(conn)
+                    self.indexes = fetch_indexes(conn)
+                    self.constraints = fetch_constraints(conn)
+                    self.views = fetch_views(conn)
+                    self.triggers = fetch_triggers(conn)
+                    self.functions = fetch_functions(conn)
+                    self.materialized_views = fetch_materialized_views(conn)
+                    self.sequences = fetch_sequences(conn)
+
+                    raise psycopg.Rollback()
+            except psycopg.Rollback:
+                pass
 
     def summary(self) -> str:
         """Return a summary of the database contents."""

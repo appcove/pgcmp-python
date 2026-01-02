@@ -352,12 +352,17 @@ Examples:
         """,
     )
     parser.add_argument(
-        "left",
+        "NEW_CONNECTION_STRING",
         help="Connection string for the left (source) database",
     )
     parser.add_argument(
-        "right",
+        "OLD_CONNECTION_STRING",
         help="Connection string for the right (target) database",
+    )
+    parser.add_argument(
+        "--apply-sql-file",
+        type=argparse.FileType("r"),
+        help="SQL file to apply to old database in a transaction before comparing (rolled back after)",
     )
     parser.add_argument(
         "--row-counts",
@@ -381,14 +386,15 @@ def main() -> int:
     # Step 1: Gather all data from both databases
     console.print("[bold]Connecting to left database...[/bold]")
     try:
-        left_db = Database.from_connection_string(args.left)
+        left_db = Database.from_connection_string(args.NEW_CONNECTION_STRING)
     except Exception as e:
         console.print(f"[red]Error connecting to left database: {e}[/red]")
         return 1
 
     console.print("[bold]Connecting to right database...[/bold]")
     try:
-        right_db = Database.from_connection_string(args.right)
+        apply_sql = args.apply_sql_file.read() if args.apply_sql_file else None
+        right_db = Database.from_connection_string(args.OLD_CONNECTION_STRING, apply_sql=apply_sql)
     except Exception as e:
         console.print(f"[red]Error connecting to right database: {e}[/red]")
         return 1
